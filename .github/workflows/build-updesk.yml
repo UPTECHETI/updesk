@@ -246,29 +246,28 @@ jobs:
         shell: pwsh
         working-directory: rustdesk-src
         run: |
-          # Pre-run flutter pub get to create ephemeral symlinks
+          # Pre-run flutter pub get to create ephemeral plugin symlinks
           Set-Location flutter
           flutter pub get
           Set-Location ..
-          
+
           # Patch d3d11_output.cpp — missing #include <chrono> causes MSVC error C2039
-          $pluginFile = "flutter\windowslutter\ephemeral\.plugin_symlinkslutter_gpu_texture_renderer\windows\d3d11_output.cpp"
+          $pluginFile = "flutter\windows\flutter\ephemeral\.plugin_symlinks\flutter_gpu_texture_renderer\windows\d3d11_output.cpp"
           if (Test-Path $pluginFile) {
-            $content = Get-Content $pluginFile -Raw
-            if ($content -notmatch '#include <chrono>') {
-              $content = "#include <chrono>`r`n" + $content
-              [System.IO.File]::WriteAllText((Resolve-Path $pluginFile).Path, $content)
+            $fc = Get-Content $pluginFile -Raw
+            if ($fc -notmatch '#include <chrono>') {
+              $fc = "#include <chrono>`r`n" + $fc
+              [System.IO.File]::WriteAllText((Resolve-Path $pluginFile).Path, $fc)
               Write-Host "Patched: $pluginFile"
             } else {
-              Write-Host "Already patched: $pluginFile"
+              Write-Host "Already has chrono include"
             }
           } else {
-            Write-Host "WARNING: Plugin file not found at expected path"
-            # Search pub cache
+            Write-Host "WARNING: Plugin file not at expected path, searching pub cache..."
             $pubCache = "$env:LOCALAPPDATA\Pub\Cache\hosted\pub.dev"
             if (Test-Path $pubCache) {
               Get-ChildItem -Path $pubCache -Recurse -Filter "d3d11_output.cpp" | ForEach-Object {
-                Write-Host "Found in pub cache: $($_.FullName)"
+                Write-Host "Found: $($_.FullName)"
                 $fc = Get-Content $_.FullName -Raw
                 if ($fc -notmatch '#include <chrono>') {
                   $fc = "#include <chrono>`r`n" + $fc
