@@ -1,0 +1,334 @@
+name: Build UpDesk for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  RUST_VERSION: "1.75"
+  SCITER_RUST_VERSION: "1.75"
+  FLUTTER_VERSION: "3.24.5"
+  FLUTTER_BRIDGE_VERSION: "3.22.3"
+  LLVM_VERSION: "15.0.6"
+  VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  CARGO_EXPAND_VERSION: "1.0.95"
+  FLUTTER_RUST_BRIDGE_VERSION: "1.80.1"
+  RUSTDESK_VERSION: "1.3.8"
+  UPDESK_SERVER: "updesk.uptech.eti.br"
+  UPDESK_KEY: "qiTu+VUce5K1VE3JZJeHS3+8MY96ihiiG40pA9RAMCc="
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1: Generate flutter-rust-bridge files (Linux)
+  # ─────────────────────────────────────────────────────────────────────────────
+  generate-bridge:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone RustDesk ${{ env.RUSTDESK_VERSION }}
+        run: |
+          git clone --depth 1 --branch ${{ env.RUSTDESK_VERSION }} \
+            --recurse-submodules \
+            https://github.com/rustdesk/rustdesk.git rustdesk-src
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get install ca-certificates -y
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            clang cmake curl gcc git g++ \
+            libclang-10-dev libgtk-3-dev llvm-10-dev \
+            nasm ninja-build pkg-config wget
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-unknown-linux-gnu
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: bridge-ubuntu-20.04
+          workspaces: rustdesk-src
+
+      - name: Install flutter (for bridge generation)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_BRIDGE_VERSION }}
+          cache: true
+
+      - name: Install flutter-rust-bridge codegen
+        run: |
+          cargo install cargo-expand \
+            --version ${{ env.CARGO_EXPAND_VERSION }} --locked
+          cargo install flutter_rust_bridge_codegen \
+            --version ${{ env.FLUTTER_RUST_BRIDGE_VERSION }} \
+            --features "uuid" --locked
+          cd rustdesk-src/flutter
+          sed -i -e 's/extended_text: 14.0.0/extended_text: 13.0.0/g' pubspec.yaml
+          flutter pub get
+
+      - name: Generate bridge files
+        run: |
+          cd rustdesk-src
+          ~/.cargo/bin/flutter_rust_bridge_codegen \
+            --rust-input ./src/flutter_ffi.rs \
+            --dart-output ./flutter/lib/generated_bridge.dart \
+            --c-output ./flutter/macos/Runner/bridge_generated.h
+          cp ./flutter/macos/Runner/bridge_generated.h \
+             ./flutter/ios/Runner/bridge_generated.h
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-artifact
+          path: |
+            rustdesk-src/src/bridge_generated.rs
+            rustdesk-src/src/bridge_generated.io.rs
+            rustdesk-src/flutter/lib/generated_bridge.dart
+            rustdesk-src/flutter/lib/generated_bridge.freezed.dart
+            rustdesk-src/flutter/macos/Runner/bridge_generated.h
+            rustdesk-src/flutter/ios/Runner/bridge_generated.h
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2: Build UpDesk for Windows x64
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-windows:
+    needs: generate-bridge
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone RustDesk ${{ env.RUSTDESK_VERSION }}
+        run: |
+          git clone --depth 1 --branch ${{ env.RUSTDESK_VERSION }} `
+            --recurse-submodules `
+            https://github.com/rustdesk/rustdesk.git rustdesk-src
+
+      - name: Download bridge artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-artifact
+          path: bridge-out
+
+      - name: Restore bridge files into source
+        shell: bash
+        run: |
+          cp -v bridge-out/rustdesk-src/src/bridge_generated.rs \
+               rustdesk-src/src/ 2>/dev/null || true
+          cp -v bridge-out/rustdesk-src/src/bridge_generated.io.rs \
+               rustdesk-src/src/ 2>/dev/null || true
+          cp -v bridge-out/rustdesk-src/flutter/lib/generated_bridge.dart \
+               rustdesk-src/flutter/lib/ 2>/dev/null || true
+          cp -v "bridge-out/rustdesk-src/flutter/lib/generated_bridge.freezed.dart" \
+               "rustdesk-src/flutter/lib/" 2>/dev/null || true
+          cp -v bridge-out/rustdesk-src/flutter/macos/Runner/bridge_generated.h \
+               rustdesk-src/flutter/macos/Runner/ 2>/dev/null || true
+          cp -v bridge-out/rustdesk-src/flutter/ios/Runner/bridge_generated.h \
+               rustdesk-src/flutter/ios/Runner/ 2>/dev/null || true
+          echo "Bridge files restored."
+
+      - name: Apply UpDesk patches
+        shell: python
+        env:
+          UPDESK_SERVER: ${{ env.UPDESK_SERVER }}
+          UPDESK_KEY: ${{ env.UPDESK_KEY }}
+        run: |
+          import os, shutil, re
+
+          base = 'rustdesk-src'
+          server = os.environ['UPDESK_SERVER']
+          key    = os.environ['UPDESK_KEY']
+
+          def patch(path, old, new, label):
+              with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                  c = f.read()
+              if old not in c:
+                  print(f"⚠️  [{label}] String not found: {old!r}")
+                  return False
+              c = c.replace(old, new)
+              with open(path, 'w', encoding='utf-8', errors='replace') as f:
+                  f.write(c)
+              print(f"✅  [{label}] OK")
+              return True
+
+          # 1. hbb_common: change default fallback rendezvous server
+          patch(
+              f'{base}/libs/hbb_common/src/config.rs',
+              '&["rs-ny.rustdesk.com"]',
+              f'&["{server}"]',
+              'hbb_common default server'
+          )
+
+          # 2. common.rs: inject hardcoded settings into load_custom_client()
+          updesk_block = f'''    // UpDesk: receiver-only mode + UP Tech server (hardcoded)
+      {{
+          config::HARD_SETTINGS.write().unwrap()
+              .insert("conn-type".to_string(), "incoming".to_string());
+          let mut ow = config::OVERWRITE_SETTINGS.write().unwrap();
+          ow.insert("custom-rendezvous-server".to_string(), "{server}".to_string());
+          ow.insert("key".to_string(), "{key}".to_string());
+          ow.insert("relay-server".to_string(), "{server}".to_string());
+      }}
+      *hbb_common::config::APP_NAME.write().unwrap() = "UpDesk".to_string();
+  '''
+          patch(
+              f'{base}/src/common.rs',
+              'pub fn load_custom_client() {\n    #[cfg(debug_assertions)]',
+              'pub fn load_custom_client() {\n' + updesk_block + '    #[cfg(debug_assertions)]',
+              'load_custom_client injection'
+          )
+
+          # 3. CMakeLists.txt: rename binary
+          patch(
+              f'{base}/flutter/windows/CMakeLists.txt',
+              'set(BINARY_NAME "rustdesk")',
+              'set(BINARY_NAME "updesk")',
+              'binary name'
+          )
+
+          # 4. Runner.rc: app metadata
+          rc_path = f'{base}/flutter/windows/runner/Runner.rc'
+          with open(rc_path, 'r', encoding='utf-8', errors='replace') as f:
+              rc = f.read()
+          rc = rc.replace('"Purslane Ltd"',              '"UP Tech"')
+          rc = rc.replace('"RustDesk Remote Desktop"',  '"UpDesk - Suporte Remoto UP Tech"')
+          rc = rc.replace('"rustdesk"',                 '"updesk"')
+          rc = rc.replace('"rustdesk.exe"',             '"updesk.exe"')
+          rc = rc.replace('"RustDesk"',                 '"UpDesk"')
+          with open(rc_path, 'w', encoding='utf-8', errors='replace') as f:
+              f.write(rc)
+          print("✅  [Runner.rc] OK")
+
+          # 5. Replace icon
+          icon_src = 'assets/app_icon.ico'
+          icon_dst = f'{base}/flutter/windows/runner/resources/app_icon.ico'
+          if os.path.exists(icon_src):
+              shutil.copy2(icon_src, icon_dst)
+              print("✅  [icon] Replaced with UP Tech icon")
+          else:
+              print("⚠️  [icon] assets/app_icon.ico not found – using default RustDesk icon")
+
+          print("\n=== All UpDesk patches applied ===")
+
+      - name: Export GHA cache env vars
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL',   process.env.ACTIONS_CACHE_URL   || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Replace Flutter engine with RustDesk custom engine
+        shell: pwsh
+        run: |
+          Set-Location rustdesk-src
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest `
+            -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip `
+            -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
+          $enginePath  = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release"
+          Move-Item -Force windows-x64-release\* $enginePath
+
+      - name: Patch Flutter dropdown
+        shell: bash
+        run: |
+          cp rustdesk-src/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff \
+             "$(dirname $(dirname $(which flutter)))"
+          cd "$(dirname $(dirname $(which flutter)))"
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff 2>/dev/null || true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: windows-2022
+          workspaces: rustdesk-src
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        shell: bash
+        run: |
+          if ! "$VCPKG_ROOT/vcpkg" install \
+              --triplet x64-windows-static \
+              --x-install-root="$VCPKG_ROOT/installed"; then
+            find "$VCPKG_ROOT/" -name "*.log" -exec sh -c 'echo "=== {} ==="; cat "{}"' \;
+            exit 1
+          fi
+
+      - name: Build UpDesk
+        shell: pwsh
+        working-directory: rustdesk-src
+        run: |
+          Invoke-WebRequest `
+            -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip `
+            -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath .
+          python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
+          # clean usbmmidd
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe",
+                            "usbmmidd_v2\deviceinstaller.exe",
+                            "usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
+          # move build output
+          $release = "flutter\build\windows\x64\runner\Release"
+          if (Test-Path $release) {
+            Move-Item $release ..\updesk-release
+          } else {
+            Write-Error "Build output not found at $release"
+            Get-ChildItem -Recurse -Filter "*.exe" flutter\build\ | Select-Object FullName
+            exit 1
+          }
+          Move-Item -Force .\usbmmidd_v2 ..\updesk-release\
+
+      - name: Upload UpDesk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updesk-windows-x64-${{ env.RUSTDESK_VERSION }}
+          path: updesk-release
+          retention-days: 30
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "## ✅ UpDesk build complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Versão base | RustDesk ${{ env.RUSTDESK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Servidor | ${{ env.UPDESK_SERVER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Modo | Receiver-only (incoming) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | updesk-windows-x64-${{ env.RUSTDESK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Baixe o artifact na aba **Actions > Artifacts**." >> $GITHUB_STEP_SUMMARY
