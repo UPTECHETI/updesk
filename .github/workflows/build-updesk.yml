@@ -27,6 +27,7 @@ jobs:
   # ── Job 1: Generate flutter-rust-bridge files (Linux Ubuntu 22.04) ───────────
   generate-bridge:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +39,7 @@ jobs:
             https://github.com/rustdesk/rustdesk.git rustdesk-src
 
       - name: Install build prerequisites
+        timeout-minutes: 15
         run: |
           sudo apt-get install ca-certificates -y
           sudo apt-get update -y
@@ -103,6 +105,7 @@ jobs:
   build-windows:
     needs: generate-bridge
     runs-on: windows-2022
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
