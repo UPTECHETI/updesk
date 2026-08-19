@@ -117,6 +117,20 @@ else:
     print(f"⚠️  [Icon] {icon_src} not found — keeping default RustDesk icon")
 
 
+
+# ─── Patch 6: Hide Network settings tab ───────────────────────────────────────
+# The network tab exposes server + key to the end user.
+# RustDesk already guards this tab with kOptionHideNetworkSetting — we simply
+# remove the entry from tabKeys so it never appears in the UI.
+patch(
+    os.path.join(BASE, "flutter/lib/desktop/pages/desktop_setting_page.dart"),
+    "    if (!bind.isDisableSettings() &&\n"
+    "        bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')\n"
+    "      SettingsTabKey.network,",
+    "",
+    "desktop_setting_page: hide network tab"
+)
+
 # ─── Summary ───────────────────────────────────────────────────────────────────
 print()
 if errors > 0:
