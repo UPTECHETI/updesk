@@ -12,6 +12,9 @@ import os
 import shutil
 import sys
 
+# Windows cp1252 nao suporta emoji — forca UTF-8 no stdout
+sys.stdout.reconfigure(encoding="utf-8")
+
 BASE = "rustdesk-src"
 SERVER = os.environ.get("UPDESK_SERVER", "updesk.uptech.eti.br")
 KEY = os.environ.get("UPDESK_KEY", "qiTu+VUce5K1VE3JZJeHS3+8MY96ihiiG40pA9RAMCc=")
