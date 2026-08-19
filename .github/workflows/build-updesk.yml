@@ -214,6 +214,21 @@ jobs:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
+
+      - name: Patch vcpkg msys2-runtime (3.5.4-2 removido dos mirrors -> 3.6.10-3)
+        shell: pwsh
+        run: |
+          $file = "C:\vcpkg\scripts\cmake\vcpkg_acquire_msys.cmake"
+          $old_url = 'URL "https://mirror.msys2.org/msys/x86_64/msys2-runtime-3.5.4-2-x86_64.pkg.tar.zst"'
+          $new_url = 'URL "https://repo.msys2.org/msys/x86_64/msys2-runtime-3.6.10-3-x86_64.pkg.tar.zst"'
+          $old_sha = 'SHA512 070aeb43385beb0e3f8d5fb28909469765116c222d53c2614f5f080be879eef0b78258334b35e8cda7625d8704efc89133f8b8fa78f309c5d680ae270efdaba8'
+          $new_sha = 'SHA512 14529e14c965b3f446279c30e86e1b9f823e8f92d0fb82ad9b75a27e8e9a75aede63342567728091d2803e8d967083997a7406c71fca79926f89bf34caf076a4'
+          $c = Get-Content $file -Raw
+          $c = $c.Replace($old_url, $new_url).Replace($old_sha, $new_sha)
+          [System.IO.File]::WriteAllText($file, $c)
+          Write-Host "vcpkg_acquire_msys.cmake patched:"
+          Select-String "msys2-runtime" $file | Select-Object -ExpandProperty Line
+
       - name: Install vcpkg dependencies
         env:
           VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
