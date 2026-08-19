@@ -316,6 +316,16 @@ jobs:
           path: UpDesk-Setup.exe
           retention-days: 30
 
+
+      - name: Deploy to Hostinger (uptech.eti.br/downloads/UpDesk-Setup.exe)
+        if: success()
+        shell: bash
+        run: |
+          echo "Fazendo upload para Hostinger..."
+          curl -s --ftp-ssl-allow -T UpDesk-Setup.exe \
+            "ftp://${{ secrets.FTP_USER }}:${{ secrets.FTP_PASSWORD }}@${{ secrets.FTP_HOST }}/downloads/UpDesk-Setup.exe"
+          echo "Deploy concluído: https://uptech.eti.br/downloads/UpDesk-Setup.exe"
+
       - name: Build summary
         shell: bash
         run: |
