@@ -126,19 +126,24 @@ jobs:
       - name: Restore bridge files
         shell: bash
         run: |
-          cp -v bridge-out/rustdesk-src/src/bridge_generated.rs \
-               rustdesk-src/src/ 2>/dev/null || true
-          cp -v bridge-out/rustdesk-src/src/bridge_generated.io.rs \
-               rustdesk-src/src/ 2>/dev/null || true
-          cp -v bridge-out/rustdesk-src/flutter/lib/generated_bridge.dart \
-               rustdesk-src/flutter/lib/ 2>/dev/null || true
-          cp -v "bridge-out/rustdesk-src/flutter/lib/generated_bridge.freezed.dart" \
-               "rustdesk-src/flutter/lib/" 2>/dev/null || true
-          cp -v bridge-out/rustdesk-src/flutter/macos/Runner/bridge_generated.h \
-               rustdesk-src/flutter/macos/Runner/ 2>/dev/null || true
-          cp -v bridge-out/rustdesk-src/flutter/ios/Runner/bridge_generated.h \
-               rustdesk-src/flutter/ios/Runner/ 2>/dev/null || true
-          echo "Bridge files restored."
+          echo "=== bridge-out structure ==="
+          find bridge-out/ -type f | sort
+          echo "==="
+          BRIDGE_RS=
+          BRIDGE_IO=
+          BRIDGE_DART=
+          BRIDGE_FREEZED=
+          BRIDGE_H=
+          [ -n "$BRIDGE_RS" ] && cp -v "$BRIDGE_RS" rustdesk-src/src/ || echo "ERROR: bridge_generated.rs not found"
+          [ -n "$BRIDGE_IO" ] && cp -v "$BRIDGE_IO" rustdesk-src/src/ || echo "WARNING: bridge_generated.io.rs not found"
+          [ -n "$BRIDGE_DART" ] && cp -v "$BRIDGE_DART" rustdesk-src/flutter/lib/ || echo "ERROR: generated_bridge.dart not found"
+          [ -n "$BRIDGE_FREEZED" ] && cp -v "$BRIDGE_FREEZED" rustdesk-src/flutter/lib/ || echo "WARNING: generated_bridge.freezed.dart not found"
+          [ -n "$BRIDGE_H" ] && cp -v "$BRIDGE_H" rustdesk-src/flutter/macos/Runner/ || echo "WARNING: bridge_generated.h not found"
+          cp -v rustdesk-src/flutter/macos/Runner/bridge_generated.h rustdesk-src/flutter/ios/Runner/ 2>/dev/null || true
+          echo "=== Verification ==="
+          ls -la rustdesk-src/src/bridge_generated.rs || { echo "FATAL: bridge_generated.rs missing"; exit 1; }
+          ls -la rustdesk-src/flutter/lib/generated_bridge.dart || { echo "FATAL: generated_bridge.dart missing"; exit 1; }
+          echo "Bridge files restored successfully."
 
       - name: Apply UpDesk patches
         shell: bash
