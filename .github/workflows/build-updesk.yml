@@ -242,6 +242,43 @@ jobs:
             exit 1
           }
 
+      - name: Patch flutter_gpu_texture_renderer (missing chrono header)
+        shell: pwsh
+        working-directory: rustdesk-src
+        run: |
+          # Pre-run flutter pub get to create ephemeral symlinks
+          Set-Location flutter
+          flutter pub get
+          Set-Location ..
+          
+          # Patch d3d11_output.cpp — missing #include <chrono> causes MSVC error C2039
+          $pluginFile = "flutter\windowslutter\ephemeral\.plugin_symlinkslutter_gpu_texture_renderer\windows\d3d11_output.cpp"
+          if (Test-Path $pluginFile) {
+            $content = Get-Content $pluginFile -Raw
+            if ($content -notmatch '#include <chrono>') {
+              $content = "#include <chrono>`r`n" + $content
+              [System.IO.File]::WriteAllText((Resolve-Path $pluginFile).Path, $content)
+              Write-Host "Patched: $pluginFile"
+            } else {
+              Write-Host "Already patched: $pluginFile"
+            }
+          } else {
+            Write-Host "WARNING: Plugin file not found at expected path"
+            # Search pub cache
+            $pubCache = "$env:LOCALAPPDATA\Pub\Cache\hosted\pub.dev"
+            if (Test-Path $pubCache) {
+              Get-ChildItem -Path $pubCache -Recurse -Filter "d3d11_output.cpp" | ForEach-Object {
+                Write-Host "Found in pub cache: $($_.FullName)"
+                $fc = Get-Content $_.FullName -Raw
+                if ($fc -notmatch '#include <chrono>') {
+                  $fc = "#include <chrono>`r`n" + $fc
+                  [System.IO.File]::WriteAllText($_.FullName, $fc)
+                  Write-Host "Patched pub cache file"
+                }
+              }
+            }
+          }
+
       - name: Build UpDesk
         shell: pwsh
         working-directory: rustdesk-src
