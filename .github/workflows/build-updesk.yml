@@ -171,7 +171,7 @@ jobs:
           Set-Location rustdesk-src
           flutter doctor -v
           flutter precache --windows
-          $engineUri = "https://github.com/rustdesk-org/engine/releases/download/main/windows-x64-release.zip"
+          $engineUri = "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
           Invoke-WebRequest -Uri $engineUri -OutFile windows-x64-release.zip
           Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
