@@ -332,16 +332,6 @@ jobs:
           retention-days: 30
 
 
-      - name: Deploy to Hostinger (uptech.eti.br/downloads/UpDesk-Setup.exe)
-        if: success()
-        shell: bash
-        run: |
-          echo "Fazendo upload para Hostinger..."
-          curl -s -T UpDesk-Setup.exe \
-            --user "${{ secrets.FTP_USER }}:${{ secrets.FTP_PASSWORD }}" \
-            "ftp://${{ secrets.FTP_HOST }}/downloads/UpDesk-Setup.exe"
-          echo "Deploy concluído: https://uptech.eti.br/downloads/UpDesk-Setup.exe"
-
       - name: Build summary
         shell: bash
         run: |
@@ -355,3 +345,35 @@ jobs:
           echo "| Artifact | updesk-windows-x64 |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Baixe na aba Actions > Artifacts." >> $GITHUB_STEP_SUMMARY
+
+  # ── Job 3: Deploy UpDesk-Setup.exe to Hostinger (Ubuntu/lftp) ───────────────
+  deploy-hostinger:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download UpDesk artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: UpDesk-Setup
+          path: .
+
+      - name: Install lftp
+        run: sudo apt-get install -y lftp
+
+      - name: Upload to Hostinger via lftp
+        env:
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+        run: |
+          lftp -u "$FTP_USER","$FTP_PASS" "ftp://$FTP_HOST" << 'EOF'
+          set ftp:passive-mode true
+          set net:timeout 120
+          set net:max-retries 3
+          set net:reconnect-interval-base 5
+          mkdir -p downloads
+          put UpDesk-Setup.exe -o downloads/UpDesk-Setup.exe
+          bye
+          EOF
+          echo "✅ Deploy concluído: https://uptech.eti.br/downloads/UpDesk-Setup.exe"
